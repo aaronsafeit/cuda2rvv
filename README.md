@@ -1,117 +1,98 @@
-CUDA2RVV: CUDA to RISC-V Vector Abstraction Layer
-Overview
-CUDA2RVV is an experimental abstraction and emulation layer designed to enable CUDA applications and libraries (such as PyTorch, OpenCV, and others in the Anaconda ecosystem) to run on RISC-V processors with vector extensions (RVV). This project facilitates porting CUDA kernels by translating CUDA constructs, intrinsics, and runtime APIs into RVV-compatible equivalents and software-emulated threading models.
+🌟 Overview
+cuda2rvv is a lightweight CUDA runtime shim and LLVM IR lowering toolkit designed to translate CUDA-style kernels to RISC-V Vector (RVV) instructions, enabling next-generation embedded vision, machine learning, and spatial AI systems to run on modern RISC-V hardware.
 
-Features
-CUDA Kernel Execution Model Emulation
-Emulates CUDA thread/block/grid hierarchy using POSIX threads and RVV vector masking to simulate warp-level and block-level parallelism.
+This project targets RISC-V platforms with RVV (RISC-V Vector Extension) and aims to provide a flexible, testable, and expandable infrastructure for building CUDA-compatible compute stacks on open hardware.
 
-Memory Management
-Provides CUDA-like memory APIs (cudaMalloc, cudaFree, cudaMemcpy) mapped to a unified memory model compatible with RVV systems.
+🎯 Project Goals
+✅ Translate CUDA kernels to RVV-compatible LLVM IR
 
-Warp-level Primitives
-Implements warp-synchronous operations (__shfl_sync, __ballot_sync) via RVV instructions and software masking to replicate CUDA’s warp communication features.
+✅ Provide a runtime simulation of CUDA APIs on RISC-V
 
-Texture and Surface Memory Emulation
-Supports CUDA texture and surface memory APIs for GPU-accelerated image processing kernels.
+✅ Support atomic ops, memory fences, warp intrinsics (__shfl_sync, __ballot_sync)
 
-Atomic Operations and Synchronization
-Maps CUDA atomic operations and synchronization primitives to RISC-V atomic and vector instructions and POSIX thread barriers.
+✅ Enable texture memory fetch and surface writes
 
-Modular Header Structure
-Organized into specific headers for core execution (cuda2rvv.h), warp operations (cuda2rvv_warp.h), memory management (cuda2rvv_memory.h), texture memory (cuda2rvv_texture.h), unified memory (cuda2rvv_unified.h), ballot operations (cuda2rvv_ballot.h), and mask management (cuda2rvv_mask.h).
+✅ Support __shared__, __global__, __device__ qualifiers
 
-CUDA Runtime Shim
-A C++ runtime shim layer emulates essential CUDA runtime APIs and kernel launches using pthreads and RVV, facilitating compatibility with existing CUDA codebases.
+✅ Vectorized memory load/store, gather/scatter
 
-Goals
-Enable porting and execution of CUDA-dependent software stacks (e.g., PyTorch, OpenCV) on RISC-V vector hardware.
-
-Provide a foundational software layer for CUDA emulation without requiring native NVIDIA hardware.
-
-Support future expansion towards full CUDA API coverage, improved performance, and enhanced concurrency.
-
-Getting Started
-Prerequisites
-RISC-V system or simulator supporting RVV extensions
-
-Clang/LLVM toolchain with RISC-V backend
-
-POSIX-compliant OS (for pthread support)
-
-Building
-The project provides modular headers and a runtime shim. Integrate into your build system and compile CUDA kernels via a custom CUDA2RVV frontend or manually adapted code.
-
-#include "cuda2rvv.h"
-#include "cuda2rvv_runtime.cpp"
-
-// Example CUDA kernel adapted for CUDA2RVV
-__global__ void vector_add_kernel(const float* A, const float* B, float* C, int N) {
-    int i = threadIdx_x;
-    if (i < N) {
-        C[i] = A[i] + B[i];
-    }
-}
-
-int main() {
-    constexpr int N = 64;
-    float A[N], B[N], C[N];
-    // Initialize A and B...
-
-    cudaMalloc((void**)&devA, sizeof(float)*N);
-    cudaMalloc((void**)&devB, sizeof(float)*N);
-    cudaMalloc((void**)&devC, sizeof(float)*N);
-
-    cudaMemcpy(devA, A, sizeof(float)*N, 0);
-    cudaMemcpy(devB, B, sizeof(float)*N, 0);
-
-    cudaLaunchKernel((cuda_kernel_t)vector_add_kernel, nullptr, dim3(1), dim3(N));
-
-    cudaMemcpy(C, devC, sizeof(float)*N, 1);
-
-    cudaFree(devA);
-    cudaFree(devB);
-    cudaFree(devC);
-
-    // Validate results...
-
-    return 0;
-}
+✅ Toolchain integration via custom LLVM IR passes
 
 
-cuda2rvv/
-├── cuda2rvv.h              # Core execution model and threading macros
-├── cuda2rvv_ballot.h       # Warp-level ballot intrinsics
-├── cuda2rvv_memory.h       # Memory management and atomic ops
-├── cuda2rvv_texture.h      # Texture and surface memory emulation
-├── cuda2rvv_unified.h      # Unified memory management
-├── cuda2rvv_warp.h         # Warp-level thread group emulation
-├── cuda2rvv_mask.h         # Mask operations for predication
-├── cuda2rvv_runtime.cpp    # CUDA runtime API shim implementation
-└── examples/               # Example CUDA kernels adapted for CUDA2RVV
+🚀 Getting Started
+1. Clone the repo
+bash
+Copy
+Edit
+git clone https://github.com/aaronsafeit/cuda2rvv.git
+cd cuda2rvv
+2. Build a Test Program
+Use one of the provided test examples:
+
+bash
+Copy
+Edit
+g++ test_main.cpp -lpthread -o test_cuda2rvv
+./test_cuda2rvv
+3. Develop a CUDA-style kernel
+Create a .cu file using __global__ functions and common CUDA APIs. Example provided in test_kernel.cu.
+
+🧠 Features
+Feature	Status
+__global__, __device__, __host__	✅
+threadIdx.x, blockIdx.x	✅
+__syncthreads()	✅
+atomicAdd, atomicMin/Max	✅
+Texture fetch/surface write	✅ (host stub)
+__shfl_sync, __ballot_sync	✅
+Vector load/store	✅
+Vector gather/scatter	✅
+Warp reductions (sum, min, max)	✅
+cudaMalloc, cudaFree	✅
+cudaMemcpy, cudaMemcpyKind	✅
+cudaMallocManaged (UM)	✅
+RVV-aware memory fences	✅
+
+🧪 Testing & Debugging
+Drop your kernel in test_kernel.cu
+
+Include it in test_main.cpp
+
+Use unified memory and threading APIs to simulate parallelism
+
+Output intermediate IR with Clang + LLVM for debugging:
+
+bash
+Copy
+Edit
+clang++ -S -emit-llvm -O1 -o kernel.ll test_kernel.cu
+🛠 LLVM Pass Integration
+The project includes:
+
+IR pass for CUDA intrinsic lowering to RVV intrinsics
+
+Pattern matching using LLVM’s PatternMatch API
+
+Hook-in before llc or codegen phase for maximum compatibility
+
+Coming soon:
+
+Custom vector scheduling
+
+Memory coalescing optimization
+
+RVV-targeted warp-wide fusion
 
 
-Limitations & Future Work
-Current threading model uses pthreads and does not yet support full grid-stride looping.
+⚠️ Disclaimer
+I have no idea what this code does.
+I’ve never programmed a day in my life. 
+If this works, it's a miracle. If it doesn't, I warned you.
+Use at your own risk. Or don't. I won’t understand either way.
 
-Memory model assumes unified memory; device-only or managed memory semantics need enhancement.
+Maybe this will inspire one fo us...
 
-Warp-level primitives are emulated in software, which may impact performance.
+## 📜 License
 
-Stream and event APIs are stubbed; full asynchronous kernel execution is pending.
+MIT – Free to use, modify, and distribute. Open hardware deserves open software.
 
-Integration with complex CUDA-dependent libraries requires ongoing adaptation and testing.
-
-Contributing
-Contributions are welcome! Please open issues or pull requests for:
-
-Expanding CUDA API coverage
-
-Optimizing RVV intrinsic mappings
-
-Supporting additional CUDA features (streams, cooperative groups, etc.)
-
-Integration with machine learning and computer vision libraries
-
-License
-This project is released under the MIT License.
