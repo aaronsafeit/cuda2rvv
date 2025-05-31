@@ -1,3 +1,4 @@
+
 #ifndef CUDA2RVV_MEMORY_H
 #define CUDA2RVV_MEMORY_H
 
@@ -10,26 +11,21 @@
  * CUDA Memory Qualifiers to RVV and RISC-V mappings
  ******************************************************************************/
 
-/* Global memory (device memory) */
+/* CUDA qualifiers as no-ops or mapped attributes */
 #define __device__
 #define __host__
 #define __global__
 
 /* Shared memory (per block shared scratchpad) */
-/* Emulated as static thread-local or explicitly allocated buffer */
 #define __shared__ static __attribute__((aligned(64)))
 
 /* Constant memory (read-only, cached) */
-/* Emulate as const qualified variables in fast memory region */
 #define __constant__ const __attribute__((section(".rodata")))
 
-/* Unified memory */
-/* CUDA Unified Memory: accessible by CPU and GPU */
-/* We emulate UM as normal heap memory with atomic consistency */
-/* Vector load/store and gather/scatter allow efficient UM accesses */
+/* Unified memory emulated as normal heap with atomic consistency */
 
 /*******************************************************************************
- * Vectorized load from global/unified memory
+ * Vectorized load/store from/to global/unified memory
  ******************************************************************************/
 static inline void vector_load_float(const float *src, float *dst, size_t n) {
     size_t vl = vsetvl_e32m1(n);
@@ -37,9 +33,6 @@ static inline void vector_load_float(const float *src, float *dst, size_t n) {
     vse32_v_f32m1(dst, vec, vl);
 }
 
-/*******************************************************************************
- * Vectorized store to global/unified memory
- ******************************************************************************/
 static inline void vector_store_float(float *dst, const float *src, size_t n) {
     size_t vl = vsetvl_e32m1(n);
     vfloat32m1_t vec = vle32_v_f32m1(src, vl);
@@ -47,42 +40,54 @@ static inline void vector_store_float(float *dst, const float *src, size_t n) {
 }
 
 /*******************************************************************************
- * Vectorized gather from non-contiguous memory addresses (e.g., scatter-gather)
+ * Vectorized gather from scattered indices (non-contiguous)
  ******************************************************************************/
-static inline void vector_gather_float(const float *base, const size_t *indices, float *dst, size_t n) {
+static inline void vector_gather_float(const float *base, const uint32_t *indices, float *dst, size_t n) {
     size_t vl = vsetvl_e32m1(n);
-    vuint32m1_t vindex = vle32_v_u32m1((const uint32_t *)indices, vl);
-    vfloat32m1_t vec = vlseg4e32_v_f32m1(base, vindex, vl); // or use vrgather if supported
-    vse32_v_f32m1(dst, vec, vl);
+    vuint32m1_t vindex = vle32_v_u32m1(indices, vl);
+    // Use vrgather to gather float elements by index from base array
+    vfloat32m1_t result = vrgather_vx_f32m1(base, vindex, vl);
+    vse32_v_f32m1(dst, result, vl);
 }
 
 /*******************************************************************************
- * Vectorized scatter to non-contiguous memory addresses
+ * Vectorized scatter to scattered indices (non-contiguous)
  ******************************************************************************/
-static inline void vector_scatter_float(float *base, const size_t *indices, const float *src, size_t n) {
+static inline void vector_scatter_float(float *base, const uint32_t *indices, const float *src, size_t n) {
     size_t vl = vsetvl_e32m1(n);
-    vuint32m1_t vindex = vle32_v_u32m1((const uint32_t *)indices, vl);
+    vuint32m1_t vindex = vle32_v_u32m1(indices, vl);
     vfloat32m1_t vec = vle32_v_f32m1(src, vl);
     vsse32_v_f32m1(base, vindex, vec, vl);
 }
 
 /*******************************************************************************
- * Atomic operations (using RVA extension) on global/unified memory
+ * Atomic operations on global/unified memory
  ******************************************************************************/
+
+/* Atomic add for int32 */
 static inline int atomicAdd_int(volatile int *addr, int val) {
-    // Use RISC-V atomic fetch-add intrinsic
     return __atomic_fetch_add(addr, val, __ATOMIC_SEQ_CST);
 }
 
+/* Atomic add for float using compare-exchange loop */
 static inline float atomicAdd_float(volatile float *addr, float val) {
-    // No direct atomic float add in RVA, emulate via CAS loop
-    float old, assumed;
+    float old_val, new_val;
     do {
-        old = __atomic_load_n(addr, __ATOMIC_SEQ_CST);
-        float new_val = old + val;
-        assumed = __atomic_compare_exchange_n(addr, &old, new_val, 0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
-    } while (!assumed);
-    return old;
+        old_val = __atomic_load_n(addr, __ATOMIC_SEQ_CST);
+        new_val = old_val + val;
+    } while (!__atomic_compare_exchange_n(addr, &old_val, new_val, 0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST));
+    return old_val;
+}
+
+/* Atomic add for int64_t */
+static inline int64_t atomicAdd_int64(volatile int64_t *addr, int64_t val) {
+    return __atomic_fetch_add(addr, val, __ATOMIC_SEQ_CST);
+}
+
+/* Atomic compare-and-exchange (generic) */
+static inline int atomicCAS_int(volatile int *addr, int expected, int desired) {
+    __atomic_compare_exchange_n(addr, &expected, desired, 0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
+    return expected;
 }
 
 /*******************************************************************************
@@ -96,8 +101,10 @@ static inline float atomicAdd_float(volatile float *addr, float val) {
  * Prefetch hints (mapped to RISC-V Zifencei or standard compiler builtins)
  ******************************************************************************/
 static inline void prefetch_global(const void* ptr) {
-    // May map to RISCV Zifencei or compiler intrinsic (no-op fallback)
+    // May map to RISCV Zifencei or compiler intrinsic (fallback to builtin prefetch)
     __builtin_prefetch(ptr, 0, 3);
+    // Optional: Insert fence if platform requires
+    // asm volatile("fence iorw, iorw" ::: "memory");
 }
 
 #endif // CUDA2RVV_MEMORY_H
