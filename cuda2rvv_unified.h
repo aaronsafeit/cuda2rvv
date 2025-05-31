@@ -7,28 +7,35 @@
 #include <errno.h>
 #include <pthread.h>
 
-// --- Unified Memory simulation for RVV-based CUDA shim ---
+/******************************************************************************
+ * CUDA Unified Memory Shim (RVV & Host Shared Heap Memory)
+ * ---------------------------------------------------------
+ * - Compatible with CUDA's unified memory interface
+ * - Internally maps to malloc/free for now
+ * - Prefetch, stream, and advice support stubs included
+ ******************************************************************************/
 
-// CUDA Unified Memory allocations map to malloc for now
-// TODO: Extend with real managed memory or shared virtual memory support
+/** Allocate unified memory (shared between host and device simulation) */
 static inline void* cudaMallocManaged(size_t size) {
-    void *ptr = malloc(size);
+    void* ptr = aligned_alloc(64, size); // alignment helps vector ops
     if (!ptr) {
-        fprintf(stderr, "cudaMallocManaged: Allocation failed for %zu bytes\n", size);
+        fprintf(stderr, "[cudaMallocManaged] Allocation failed: %zu bytes (%s)\n", size, strerror(errno));
         return NULL;
     }
-    // In CUDA, unified memory can be accessed by host and device
-    // Here host and "device" (emulated) share the same pointer
+    memset(ptr, 0, size); // zero-initialize for safety
     return ptr;
 }
 
+/** Free unified memory */
 static inline void cudaFree(void* ptr) {
-    if (ptr) {
-        free(ptr);
-    }
+    if (ptr) free(ptr);
 }
 
-// cudaMemcpyKind enumeration for compatibility
+
+/******************************************************************************
+ * Memcpy Simulation (All memory is unified)
+ ******************************************************************************/
+
 typedef enum {
     cudaMemcpyHostToHost = 0,
     cudaMemcpyHostToDevice,
@@ -37,49 +44,76 @@ typedef enum {
     cudaMemcpyDefault
 } cudaMemcpyKind;
 
-// Simulated cudaMemcpy: since host and device memory are unified,
-// this is just a memcpy. Future extension can add async and memory domain checks.
 static inline int cudaMemcpy(void* dst, const void* src, size_t count, cudaMemcpyKind kind) {
-    (void)kind;  // Unused, all memory is unified in this shim
     if (!dst || !src) {
-        fprintf(stderr, "cudaMemcpy: Null pointer encountered\n");
+        fprintf(stderr, "[cudaMemcpy] Error: NULL pointer detected (kind=%d)\n", kind);
         return -1;
     }
     memcpy(dst, src, count);
-    return 0; // success
-}
-
-// cudaMemPrefetchAsync stub: no-op in this shim, placeholder for future prefetch support
-static inline int cudaMemPrefetchAsync(const void* devPtr, size_t count, int device, pthread_t stream) {
-    (void)devPtr; (void)count; (void)device; (void)stream;
-    // Prefetch not implemented yet, treat as no-op
     return 0;
 }
 
-// cudaMemAdvise stub: no-op in shim, can be extended for page migration hints
+
+/******************************************************************************
+ * cudaMemPrefetchAsync / cudaMemAdvise (Future extensibility)
+ ******************************************************************************/
+
+static inline int cudaMemPrefetchAsync(const void* devPtr, size_t count, int device, pthread_t stream) {
+    (void)devPtr; (void)count; (void)device; (void)stream;
+    // Simulated environment: no action needed
+    return 0;
+}
+
 static inline int cudaMemAdvise(const void* devPtr, size_t count, int advice, int device) {
     (void)devPtr; (void)count; (void)advice; (void)device;
     return 0;
 }
 
-// Memory advice constants (subset)
 #define cudaMemAdviseSetReadMostly 1
 #define cudaMemAdviseUnsetReadMostly 2
 
-// Stream type for compatibility
+
+/******************************************************************************
+ * Stream & Synchronization Compatibility (Pthreads-based Stub)
+ ******************************************************************************/
+
 typedef pthread_t cudaStream_t;
 
-// cudaStreamCreate and cudaStreamDestroy map to pthread create/join in your threading shim
 static inline int cudaStreamCreate(cudaStream_t* stream) {
     (void)stream;
-    // Stream creation stub, expand with your threading model
+    // Stub: no real threading model tied to streams yet
     return 0;
 }
 
 static inline int cudaStreamDestroy(cudaStream_t stream) {
     (void)stream;
-    // Stream destroy stub
     return 0;
+}
+
+static inline int cudaStreamSynchronize(cudaStream_t stream) {
+    (void)stream;
+    return 0;
+}
+
+/** Full device-wide synchronization (stub for compatibility) */
+static inline int cudaDeviceSynchronize() {
+    // In RVV simulation, all ops are synchronous for now
+    return 0;
+}
+
+
+/******************************************************************************
+ * Debug / Utility Tools for Memory Inspection
+ ******************************************************************************/
+
+static inline void cudaPrintBytes(const void* ptr, size_t count) {
+    const unsigned char* p = (const unsigned char*)ptr;
+    printf("[cuda2rvv] Memory dump (%zu bytes):\n", count);
+    for (size_t i = 0; i < count; ++i) {
+        printf("%02X ", p[i]);
+        if ((i + 1) % 16 == 0) printf("\n");
+    }
+    if (count % 16 != 0) printf("\n");
 }
 
 #endif // CUDA2RVV_UNIFIED_H
