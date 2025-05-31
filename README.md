@@ -90,7 +90,7 @@ I’ve never programmed a day in my life.
 If this works, it's a miracle. If it doesn't, I warned you.
 Use at your own risk. Or don't. I won’t understand either way.
 
-Maybe this will inspire one fo us...
+Maybe this will inspire one of us...
 
 ## 📜 License
 
