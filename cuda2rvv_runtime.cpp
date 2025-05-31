@@ -2,6 +2,7 @@
 #include <vector>
 #include <cstring>
 #include <pthread.h>
+#include <atomic>
 #include "cuda2rvv.h"
 #include "cuda2rvv_ballot.h"
 #include "cuda2rvv_memory.h"
@@ -36,8 +37,10 @@ static void* cuda_thread_worker(void* arg) {
     __tid = params->tid;
     __blockDim = g_blockDim;
     __gridDim = g_gridDim;
+
     // Call kernel with kernel_args pointer
     params->kernel_func(params->kernel_args);
+
     pthread_barrier_wait(&g_blockBarrier); // emulate __syncthreads()
     return nullptr;
 }
@@ -117,6 +120,101 @@ int cuda2rvv_event_record(void* event, void* stream) {
 // Stub for event synchronize
 int cuda2rvv_event_synchronize(void* event) {
     return 0;
+}
+
+// ----------------------
+// Additional CUDA intrinsic runtime support
+// ----------------------
+
+// Synchronization primitive corresponding to __syncthreads()
+extern "C" void cuda2rvv_syncthreads() {
+    pthread_barrier_wait(&g_blockBarrier);
+}
+
+// Emulate lane id retrieval (__laneid)
+extern "C" size_t cuda2rvv_get_lane_id() {
+    return __tid % g_blockDim;
+}
+
+// Warp vote emulation (all active threads true/false)
+extern "C" int cuda2rvv_vote_all(int predicate) {
+    static std::atomic<int> vote_count{0};
+    static std::atomic<bool> vote_result{true};
+    static pthread_mutex_t vote_mutex = PTHREAD_MUTEX_INITIALIZER;
+    static pthread_cond_t vote_cond = PTHREAD_COND_INITIALIZER;
+    static size_t vote_waiting = 0;
+
+    pthread_mutex_lock(&vote_mutex);
+    if (!predicate) {
+        vote_result = false;
+    }
+    vote_waiting++;
+    if (vote_waiting == g_blockDim) {
+        vote_count = 0;
+        vote_waiting = 0;
+        pthread_cond_broadcast(&vote_cond);
+        int result = vote_result;
+        vote_result = true; // reset for next use
+        pthread_mutex_unlock(&vote_mutex);
+        return result;
+    } else {
+        pthread_cond_wait(&vote_cond, &vote_mutex);
+        int result = vote_result;
+        pthread_mutex_unlock(&vote_mutex);
+        return result;
+    }
+}
+
+// Warp vote emulation (any active threads true)
+extern "C" int cuda2rvv_vote_any(int predicate) {
+    static std::atomic<int> vote_count{0};
+    static std::atomic<bool> vote_result{false};
+    static pthread_mutex_t vote_mutex = PTHREAD_MUTEX_INITIALIZER;
+    static pthread_cond_t vote_cond = PTHREAD_COND_INITIALIZER;
+    static size_t vote_waiting = 0;
+
+    pthread_mutex_lock(&vote_mutex);
+    if (predicate) {
+        vote_result = true;
+    }
+    vote_waiting++;
+    if (vote_waiting == g_blockDim) {
+        vote_count = 0;
+        vote_waiting = 0;
+        pthread_cond_broadcast(&vote_cond);
+        int result = vote_result;
+        vote_result = false; // reset for next use
+        pthread_mutex_unlock(&vote_mutex);
+        return result;
+    } else {
+        pthread_cond_wait(&vote_cond, &vote_mutex);
+        int result = vote_result;
+        pthread_mutex_unlock(&vote_mutex);
+        return result;
+    }
+}
+
+// Atomic add emulation (32-bit integer)
+extern "C" int cuda2rvv_atomic_add(int *addr, int val) {
+    return __sync_fetch_and_add(addr, val);
+}
+
+// Atomic exchange emulation (32-bit integer)
+extern "C" int cuda2rvv_atomic_exch(int *addr, int val) {
+    return __sync_lock_test_and_set(addr, val);
+}
+
+// Stub for texture memory access (can be expanded to actual texture cache emulation)
+extern "C" float cuda2rvv_texture_fetch(const float *tex, int index) {
+    return tex[index];
+}
+
+// Debug helper to print thread/block info
+extern "C" void cuda2rvv_print_context() {
+    std::cout << "[CUDA2RVV] threadIdx: " << (__tid % g_blockDim)
+              << " blockIdx: " << (__tid / g_blockDim)
+              << " blockDim: " << g_blockDim
+              << " gridDim: " << g_gridDim << std::endl;
 }
 
 // ----------------------
