@@ -40,13 +40,22 @@ static inline void destroy_cuda_context() {
 }
 
 // --- Utility macros for explicit vector length control (RVV) ---
-// Placeholder: set vector length 'vl' for RVV intrinsics (to be set by runtime)
+// Vector length 'vl' for RVV intrinsics (set by runtime/kernel launcher)
 extern size_t __rvv_vl;
 #define RVV_VL (__rvv_vl)
 
-// --- Optional helper macros for memory fences and atomic operations ---
-// You can extend these later for RVV atomic support or RISC-V memory fences
+// --- Memory fence and atomic helpers ---
+// RISC-V fence for ordering memory operations, extendable for atomic operations
 #define __threadfence() asm volatile("fence rw, rw" ::: "memory")
 #define __threadfence_block() asm volatile("fence rw, rw" ::: "memory")
+
+// --- Lane ID and warp size helpers ---
+// CUDA lane id (thread's index within warp), assuming warp size = 32 by default
+static inline size_t __laneid() {
+    return __tid % 32;
+}
+static inline size_t __warpsize() {
+    return 32;
+}
 
 #endif // CUDA2RVV_H
